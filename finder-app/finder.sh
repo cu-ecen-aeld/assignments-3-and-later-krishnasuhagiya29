@@ -4,13 +4,14 @@
 
 # Check the validity of the arguments
 if [[ "$1" == "" || "$2" == "" ]] ; then
-echo "Any of the filesdir or searchstr arguments are not specified"
+echo "Exit 1: Any of the filesdir or searchstr arguments are not specified"
+echo "Usage: ./finder.sh <filesdir> <searchstr>"
 exit 1
 fi
 
 # Check if the specified directory exists
 if [ ! -d "$1" ]; then
-echo "The specified filesdir does not exist"
+echo "Exit 1: The specified filesdir does not exist"
 exit 1
 fi
 
