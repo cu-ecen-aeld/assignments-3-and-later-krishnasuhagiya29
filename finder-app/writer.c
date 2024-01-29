@@ -9,12 +9,13 @@
 
 int main(int argc, char *argv[]) {
 	int fd;
-	ssize_t nr;
+	ssize_t bytes_written;
 	int length = 0;
 
 	// Setup syslog logging using LOG_USER
 	openlog(NULL, 0, LOG_USER);
-	if (argc < 3) {
+	// Check validity of the number of command line arguments
+	if (argc != 3) {
 		syslog(LOG_ERR, "Invalid Number of arguments: %d", argc);
 		syslog(LOG_DEBUG, "Usage: ./writer.sh <file> <string>");
 		return 1;
@@ -32,15 +33,15 @@ int main(int argc, char *argv[]) {
 	const char *buf = argv[2];
 	// Get the length of the string
 	length = strlen(buf);
-	nr = write (fd, buf, length);
-	if (nr == -1) {
+	bytes_written = write (fd, buf, length);
+	if (bytes_written == -1) {
 		// Write failure
 		syslog(LOG_ERR, "Failed writing to file %s with an error: %s", file_name, strerror(errno));
 		return 1;
 	}
-	else if (nr != length) {
+	else if (bytes_written != length) {
 		// Partial write, errno is not set in this case
-		syslog(LOG_ERR, "File %s partially written with %ld bytes out of %d bytes", file_name, nr, length);
+		syslog(LOG_ERR, "File %s partially written with %ld bytes out of %d bytes", file_name, bytes_written, length);
 		return 1;
 	}
 	else {
