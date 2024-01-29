@@ -37,16 +37,22 @@ int main(int argc, char *argv[]) {
 	if (bytes_written == -1) {
 		// Write failure
 		syslog(LOG_ERR, "Failed writing to file %s with an error: %s", file_name, strerror(errno));
+		closelog();
+		close(fd);
 		return 1;
 	}
 	else if (bytes_written != length) {
 		// Partial write, errno is not set in this case
 		syslog(LOG_ERR, "File %s partially written with %ld bytes out of %d bytes", file_name, bytes_written, length);
+		closelog();
+		close(fd);
 		return 1;
 	}
 	else {
 		// Write successful
 		syslog(LOG_DEBUG, "Writing %s to %s", buf, file_name);
+		closelog();
+		close(fd);
 	}
 
 	return 0;
