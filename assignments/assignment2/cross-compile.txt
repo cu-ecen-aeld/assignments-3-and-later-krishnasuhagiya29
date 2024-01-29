@@ -1,5 +1,3 @@
-Using built-in specs.
-COLLECT_GCC=aarch64-none-linux-gnu-gcc
-COLLECT_LTO_WRAPPER=/home/krishna/arm-cross-compiler/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin/../libexec/gcc/aarch64-none-linux-gnu/10.2.1/lto-wrapper
-/home/krishna/arm-cross-compiler/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin/../aarch64-none-linux-gnu/libc
-
+Version: 10.2.1 20201103 (GNU Toolchain for the A-profile Architecture 10.2-2020.11 (arm-10.16))
+Configuration: /tmp/dgboter/bbs/build04--cen7x86_64/buildbot/cen7x86_64--aarch64-none-linux-gnu/build/src/gcc/configure
+sysroot path: /home/krishna/arm-cross-compiler/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin/../aarch64-none-linux-gnu/libc

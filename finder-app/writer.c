@@ -5,12 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
+#include <errno.h>
 
 int main(int argc, char *argv[]) {
 	int fd;
 	ssize_t nr;
 	int length = 0;
 
+	// Setup syslog logging using LOG_USER
 	openlog(NULL, 0, LOG_USER);
 	if (argc < 3) {
 		syslog(LOG_ERR, "Invalid Number of arguments: %d", argc);
@@ -18,29 +20,33 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	// Open the file specified by the user to write the string to
 	const char *file_name = argv[1];
-	fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+	fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);	// User: rw, Group: rw, Others: r
 	if(fd == -1) {
-		syslog(LOG_ERR, "Could not open %s", file_name);
+		syslog(LOG_ERR, "Failed opening file %s with an error: %s", file_name, strerror(errno));
 		return 1;
 	}
 
-	// Write the string to file
+	// Write the string specified by the user
 	const char *buf = argv[2];
+	// Get the length of the string
 	length = strlen(buf);
 	nr = write (fd, buf, length);
 	if (nr == -1) {
-		syslog(LOG_ERR, "Write to %s failed", file_name);
+		// Write failure
+		syslog(LOG_ERR, "Failed writing to file %s with an error: %s", file_name, strerror(errno));
 		return 1;
 	}
 	else if (nr != length) {
-		syslog(LOG_ERR, "Write to %s failed", file_name);
+		// Partial write, errno is not set in this case
+		syslog(LOG_ERR, "File %s partially written with %ld bytes out of %d bytes", file_name, nr, length);
 		return 1;
 	}
 	else {
+		// Write successful
 		syslog(LOG_DEBUG, "Writing %s to %s", buf, file_name);
 	}
 
 	return 0;
 }
-
