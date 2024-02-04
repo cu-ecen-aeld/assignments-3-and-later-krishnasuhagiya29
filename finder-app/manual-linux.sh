@@ -38,7 +38,7 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mrproper
     make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
     make -j4 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE all
-    make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules
+    #make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules
     make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs
 fi
 
@@ -102,8 +102,9 @@ make CROSS_COMPILE=$CROSS_COMPILE
 cp finder.sh ${OUTDIR}/rootfs/home
 cp finder-test.sh ${OUTDIR}/rootfs/home
 cp writer ${OUTDIR}/rootfs/home
-cp conf/username.txt ${OUTDIR}/rootfs/home
-cp conf/assignment.txt ${OUTDIR}/rootfs/home
+mkdir ${OUTDIR}/rootfs/home/conf/
+cp conf/username.txt ${OUTDIR}/rootfs/home/conf/
+cp conf/assignment.txt ${OUTDIR}/rootfs/home/conf/
 cp autorun-qemu.sh ${OUTDIR}/rootfs/home
 
 # TODO: Chown the root directory
