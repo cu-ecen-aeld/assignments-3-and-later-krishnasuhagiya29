@@ -8,9 +8,10 @@ CFLAGS  = -g -Wall -Werror
 # Set the target name
 TARGET = aesdsocket
 
-.PHONY: all clean
+.PHONY: default all clean
 
-# Default build
+default: $(TARGET)
+
 all: $(TARGET)
 
 $(TARGET): $(TARGET).o
