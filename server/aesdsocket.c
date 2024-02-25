@@ -75,6 +75,10 @@ int main(int argc, char *argv[]) {
 
 	syslog(LOG_INFO, "Socket created successfully with fd: %d\r\n", sock_fd);
 
+	/* Set socket to non blocking */
+    int flags = fcntl(sock_fd, F_GETFL, 0);
+    fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK);
+
 	// Running the application numtiple times without the reuse code below results into: bind() failed with an error: Address already in use#015
 	if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
 		syslog(LOG_ERR, "setsockopt() failed with an error: %s\r\n", strerror(errno));
@@ -114,7 +118,7 @@ int main(int argc, char *argv[]) {
 		struct sockaddr_in client_addr;
 		socklen_t client_addr_len = sizeof(client_addr);
 		accept_fd = accept(sock_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-		if (accept_fd == -1) {
+		if((accept_fd == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
 			syslog(LOG_ERR, "accept() failed with an error: %s\r\n", strerror(errno));
 			continue;
 		}
