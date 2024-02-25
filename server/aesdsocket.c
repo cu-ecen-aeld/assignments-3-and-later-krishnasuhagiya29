@@ -33,7 +33,7 @@ void signal_handler(int sig_no);
 
 int main(int argc, char *argv[]) {
 	struct addrinfo hints, *servinfo = NULL;
-	int accept_fd, fd;
+	int accept_fd, fd = 0;
 	int yes=1;
 
 	// Setup syslog logging using LOG_USER
