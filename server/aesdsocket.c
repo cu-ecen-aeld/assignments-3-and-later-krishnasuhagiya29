@@ -27,7 +27,7 @@ bool run_as_daemon = false;
 int sock_fd;
 char *recv_buf;
 
-int _daemon(void);
+void _daemon(void);
 
 void signal_handler(int sig_no);
 
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
 
 	if (run_as_daemon == true)
 	{
-		daemon(0, 0);
+		_daemon();
 	}
 
 	if (listen(sock_fd, BACKLOG) == -1) {
@@ -222,4 +222,63 @@ void signal_handler(int sig_no) {
 		closelog();
 		exit(0);
 	}
+}
+
+void _daemon(void) {
+	// PID: Process ID
+	// SID: Session ID
+	pid_t pid, sid;
+	int fd = 0;
+
+	fflush(stdout);
+	pid = fork(); // Fork off the parent process
+	if (pid < 0) {
+		syslog(LOG_ERR, "Unable to fork\r\n");
+		exit(EXIT_FAILURE);
+	}
+	if (pid > 0) {
+		syslog(LOG_ERR, "Exiting\r\n");
+		exit(EXIT_SUCCESS);
+	}
+
+	syslog(LOG_INFO, "Child created\r\n");
+
+	// Create a SID for child
+	sid = setsid();
+	if (sid < 0) {
+	// FAIL
+		syslog(LOG_ERR, "Unable to create a session\r\n");
+		exit(EXIT_FAILURE);
+	}
+	if ((chdir("/")) < 0) {
+	// FAIL
+		syslog(LOG_ERR, "Unable to change working directory\r\n");
+		exit(EXIT_FAILURE);
+	}
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+
+	fd = open("/dev/null", O_WRONLY);
+	if (fd == -1)
+	{
+		syslog(LOG_ERR, "open failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	if (dup2(fd, STDIN_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDIN_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	if (dup2(fd, STDOUT_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDOUT_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	if (dup2(fd, STDERR_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDERR_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	close(fd);
 }
