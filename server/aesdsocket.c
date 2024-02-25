@@ -32,7 +32,7 @@ int _daemon(void);
 void signal_handler(int sig_no);
 
 int main(int argc, char *argv[]) {
-	struct addrinfo hints, *servinfo;
+	struct addrinfo hints, *servinfo = NULL;
 	int accept_fd, fd;
 	int yes=1;
 
@@ -65,7 +65,13 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-	sock_fd = socket(hints.ai_family, hints.ai_socktype, hints.ai_protocol);
+	if(servinfo == NULL)
+	{
+		syslog(LOG_ERR, "servinfo is NULL\r\n");
+		exit(1);
+	}
+
+	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
 	if (sock_fd == -1)
 	{
 		syslog(LOG_ERR, "socket() failed with an error: %s\r\n", strerror(errno));
@@ -86,7 +92,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}	
 
-	if (bind(sock_fd, servinfo->ai_addr, servinfo->ai_addrlen) == -1) {
+	if (bind(sock_fd, servinfo->ai_addr, sizeof(struct addrinfo)) == -1) {
 		syslog(LOG_ERR, "bind() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
 		exit(1);
