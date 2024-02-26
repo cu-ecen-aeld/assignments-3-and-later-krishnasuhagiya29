@@ -24,30 +24,24 @@
 #define FILE_NAME	"/var/tmp/aesdsocketdata"
 
 bool run_as_daemon = false;
-int sock_fd;
-char *recv_buf;
-
-void _daemon(void);
+int sock_fd, accept_fd = 0;
+char *recv_buf = NULL;
 
 void signal_handler(int sig_no);
 
+void setup_signal_handlers(void);
+
+void create_daemon(void);
+
 int main(int argc, char *argv[]) {
 	struct addrinfo hints, *servinfo = NULL;
-	int accept_fd, fd = 0;
+	int fd = 0;
 	int yes=1;
 
 	// Setup syslog logging using LOG_USER
 	openlog(NULL, 0, LOG_USER);
 
-	if(signal(SIGINT, signal_handler) == SIG_ERR) {
-		syslog(LOG_ERR, "signal() for SIGINT failed with an error: %s\r\n", strerror(errno));
-		exit(1);
-	}
-
-	if(signal(SIGTERM, signal_handler) == SIG_ERR) {
-		syslog(LOG_ERR, "signal() for SIGTERM failed with an error: %s\r\n", strerror(errno));
-		exit(1);
-	}
+	setup_signal_handlers();
 
 	if ((argc == 2) && strcmp(argv[1], "-d") == 0) {
 		run_as_daemon = true;
@@ -64,21 +58,21 @@ int main(int argc, char *argv[]) {
 	if (err != 0) {
 		syslog(LOG_ERR, "getaddrinfo() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	if(servinfo == NULL)
 	{
 		syslog(LOG_ERR, "servinfo is NULL\r\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
-	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, 0);
+	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, PROTOCOL);
 	if (sock_fd == -1)
 	{
 		syslog(LOG_ERR, "socket() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	syslog(LOG_INFO, "Socket created successfully with fd: %d\r\n", sock_fd);
@@ -87,13 +81,13 @@ int main(int argc, char *argv[]) {
 	if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
 		syslog(LOG_ERR, "setsockopt() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}	
 
 	if (bind(sock_fd, servinfo->ai_addr, sizeof(struct addrinfo)) == -1) {
 		syslog(LOG_ERR, "bind() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	syslog(LOG_INFO, "Socket bound successfully \r\n");
@@ -106,12 +100,12 @@ int main(int argc, char *argv[]) {
 
 	if (run_as_daemon == true)
 	{
-		_daemon();
+		create_daemon();
 	}
 
 	if (listen(sock_fd, BACKLOG) == -1) {
 		syslog(LOG_ERR, "listen() failed with an error: %s\r\n", strerror(errno));
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	bool packet_complete = false;
@@ -128,39 +122,36 @@ int main(int argc, char *argv[]) {
 		}
 
 		char client_ip[INET_ADDRSTRLEN];
-		inet_ntop(PF_INET,
-			&(client_addr.sin_addr),
-			client_ip, INET_ADDRSTRLEN );
+		inet_ntop(PF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN );
 		syslog(LOG_INFO, "Accepted connection from %s\r\n", client_ip);
 
 		fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
 		if(fd == -1) {
 			syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
 
 		do
 		{
-			memset(recv_buf, 0, BUF_SIZE);
 			recv_bytes = recv(accept_fd, recv_buf, BUF_SIZE, 0);
 			if (recv_bytes == -1)
 			{
 				syslog(LOG_ERR, "recv() failed with an error: %s\r\n", strerror(errno));
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 
 			bytes_written = write(fd, recv_buf, recv_bytes);
 			if (bytes_written == -1) {
 				syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
 				close(fd);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			else if (bytes_written != recv_bytes) {
 				// Partial write, errno is not set in this case
 				syslog(LOG_ERR, "File partially written with %d bytes out of %d bytes", bytes_written, recv_bytes);
 				close(fd);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			syslog(LOG_INFO, "Written %d bytes to the file\r\n", recv_bytes);
 
@@ -176,18 +167,17 @@ int main(int argc, char *argv[]) {
 		{
 			syslog(LOG_ERR, "lseek() failed with an error: %s\r\n", strerror(errno));
 			close(fd);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 
 		do
 		{
-			memset(recv_buf, 0, BUF_SIZE);
 			bytes_read = read(fd, recv_buf, BUF_SIZE);
 			if (bytes_read == -1)
 			{
 				syslog(LOG_ERR, "read() failed with an error: %s\r\n", strerror(errno));
 				close(fd);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 
 			if (bytes_read > 0)
@@ -211,6 +201,8 @@ int main(int argc, char *argv[]) {
 
 	free(recv_buf);
 
+	closelog();
+
 	return 0;
 }
 
@@ -219,14 +211,27 @@ void signal_handler(int sig_no) {
 	{
 		syslog(LOG_INFO, "Caught Signal, exiting\r\n");
 		free(recv_buf);
+		close(accept_fd);
 		close(sock_fd);
 		remove(FILE_NAME);
 		closelog();
-		exit(0);
+		exit(EXIT_SUCCESS);
 	}
 }
 
-void _daemon(void) {
+void setup_signal_handlers(void) {
+	if(signal(SIGINT, signal_handler) == SIG_ERR) {
+		syslog(LOG_ERR, "signal() for SIGINT failed with an error: %s\r\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	if(signal(SIGTERM, signal_handler) == SIG_ERR) {
+		syslog(LOG_ERR, "signal() for SIGTERM failed with an error: %s\r\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+}
+
+void create_daemon(void) {
 	// PID: Process ID
 	// SID: Session ID
 	pid_t pid, sid;
@@ -248,12 +253,10 @@ void _daemon(void) {
 	// Create a SID for child
 	sid = setsid();
 	if (sid < 0) {
-	// FAIL
 		syslog(LOG_ERR, "Unable to create a session\r\n");
 		exit(EXIT_FAILURE);
 	}
 	if ((chdir("/")) < 0) {
-	// FAIL
 		syslog(LOG_ERR, "Unable to change working directory\r\n");
 		exit(EXIT_FAILURE);
 	}
