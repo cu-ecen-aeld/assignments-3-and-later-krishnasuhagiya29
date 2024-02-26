@@ -57,9 +57,11 @@ int main(int argc, char *argv[]) {
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = DOMAIN;
 	hints.ai_socktype = TYPE;
-	hints.ai_protocol = PROTOCOL;
+	hints.ai_flags = AI_PASSIVE;
 
-	if ((getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
+	int err = getaddrinfo(NULL, PORT, &hints, &servinfo);
+
+	if (err != 0) {
 		syslog(LOG_ERR, "getaddrinfo() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
 		exit(1);
@@ -71,7 +73,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
+	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, 0);
 	if (sock_fd == -1)
 	{
 		syslog(LOG_ERR, "socket() failed with an error: %s\r\n", strerror(errno));
