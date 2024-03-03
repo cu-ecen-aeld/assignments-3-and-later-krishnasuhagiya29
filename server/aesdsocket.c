@@ -14,6 +14,9 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <syslog.h>
+#include <time.h>
+#include <sys/time.h>
+#include <pthread.h>
 
 #define PORT "9000"  // the port users will be connecting to
 #define DOMAIN	PF_INET
@@ -22,10 +25,13 @@
 #define BACKLOG 10	 // how many pending connections queue will hold
 #define BUF_SIZE	1024
 #define FILE_NAME	"/var/tmp/aesdsocketdata"
+#define TEN_SECONDS	10
+#define TIMER_ARRAY_SIZE	50
 
 bool run_as_daemon = false;
 int sock_fd, accept_fd = 0;
 char *recv_buf = NULL;
+pthread_mutex_t mutex;
 
 void signal_handler(int sig_no);
 
@@ -40,6 +46,13 @@ int main(int argc, char *argv[]) {
 
 	// Setup syslog logging using LOG_USER
 	openlog(NULL, 0, LOG_USER);
+
+    // Initialize mutex
+    if (pthread_mutex_init(&mutex, NULL) != 0)
+    {
+        syslog(LOG_ERR, "getaddrinfo() failed with an error: %s\r\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
 
 	setup_signal_handlers();
 
@@ -219,7 +232,53 @@ void signal_handler(int sig_no) {
 	}
 }
 
+// TODO: Make the alarm_handler smaller
+void alarm_handler(int sig_no) {
+	time_t time_now ;
+	struct tm *tm_time_now;
+    char MY_TIME[TIMER_ARRAY_SIZE];
+    int bytes_written = 0;
+    time( &time_now );
+
+    //localtime() uses the time pointed by time_now,
+    // to fill a tm_time_now structure with the
+    // values that represent the
+    // corresponding local time.
+
+    tm_time_now = localtime( &time_now );
+
+    // using strftime to display time
+    strftime(MY_TIME, sizeof(MY_TIME), "%A %B %d %H:%M:%S %Y\n", tm_time_now);
+    printf("%s\n", MY_TIME);
+    if(pthread_mutex_lock(&mutex) != 0)
+    {
+		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
+    }
+    else {
+		int fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+		if(fd == -1) {
+			syslog(LOG_ERR, "Failed opening file %s with an error: %s from %s", FILE_NAME, strerror(errno), __func__);
+			exit(EXIT_FAILURE);
+		}
+
+		bytes_written = write(fd, MY_TIME, sizeof(MY_TIME));
+		if (bytes_written == -1) {
+			syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
+			close(fd);
+			exit(EXIT_FAILURE);
+		}
+		if(pthread_mutex_unlock(&mutex) != 0)
+		{
+			syslog(LOG_ERR, "Failed to unlock mutex from %s\r\n", __func__);
+			close(fd);
+		}
+		close(fd);
+    }
+}
+
 void setup_signal_handlers(void) {
+	struct itimerval delay;
+	int ret;
 	if(signal(SIGINT, signal_handler) == SIG_ERR) {
 		syslog(LOG_ERR, "signal() for SIGINT failed with an error: %s\r\n", strerror(errno));
 		exit(EXIT_FAILURE);
@@ -227,6 +286,21 @@ void setup_signal_handlers(void) {
 
 	if(signal(SIGTERM, signal_handler) == SIG_ERR) {
 		syslog(LOG_ERR, "signal() for SIGTERM failed with an error: %s\r\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	delay.it_value.tv_sec = TEN_SECONDS;
+	delay.it_value.tv_usec = 0;
+	delay.it_interval.tv_sec = delay.it_value.tv_sec;
+	delay.it_interval.tv_usec = delay.it_value.tv_usec;
+	ret = setitimer (ITIMER_REAL, &delay, NULL);
+	if (ret) {
+		syslog(LOG_ERR, "setitimer() failed with an error: %s\r\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+
+	if(signal(SIGALRM, alarm_handler) == SIG_ERR) {
+		syslog(LOG_ERR, "signal() for SIGALRM failed with an error: %s\r\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 }
