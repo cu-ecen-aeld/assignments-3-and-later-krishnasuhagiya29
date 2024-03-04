@@ -15,7 +15,7 @@ default: $(TARGET)
 all: $(TARGET)
 
 $(TARGET): $(TARGET).o
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o -lpthread
 
 $(TARGET).o: $(TARGET).c
 	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $(TARGET).c
