@@ -169,7 +169,8 @@ void signal_handler(int sig_no) {
 void alarm_handler(int sig_no) {
 	time_t time_now ;
 	struct tm *tm_time_now;
-    char MY_TIME[TIMER_ARRAY_SIZE] = {'\0'};
+    char MY_TIME[TIMER_ARRAY_SIZE];
+    memset(&MY_TIME, 0, TIMER_ARRAY_SIZE);
     int bytes_written = 0;
     time( &time_now );
 
@@ -181,14 +182,16 @@ void alarm_handler(int sig_no) {
     tm_time_now = localtime( &time_now );
 
     // using strftime to display time
+    memset(&MY_TIME, 0, TIMER_ARRAY_SIZE);
     strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %A %B %d %H:%M:%S %Y\n", tm_time_now);
+
     if(pthread_mutex_lock(&mutex) != 0)
     {
 		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
     }
     else {
 
-		bytes_written = write(file_fd, MY_TIME, sizeof(MY_TIME));
+		bytes_written = write(file_fd, MY_TIME, strlen(MY_TIME));
 		if (bytes_written == -1) {
 			syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
 			close(file_fd);
