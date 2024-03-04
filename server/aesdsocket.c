@@ -383,7 +383,6 @@ int main(int argc, char *argv[]) {
 	syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
 
 	while(!term_sig_received) {  // main accept() loop
-		syslog(LOG_INFO, "in while loop\n");
 		struct sockaddr_in client_addr;
 		socklen_t client_addr_len = sizeof(client_addr);
 		accept_fd = accept(sock_fd, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -433,8 +432,6 @@ int main(int argc, char *argv[]) {
 	        }
 	    }
 	}
-
-	syslog(LOG_INFO, "out of while loop\n");
 
     while (!SLIST_EMPTY(&head))
     {
