@@ -4,6 +4,8 @@ CC ?= $(CROSS_COMPILE)gcc
 # Add debugging information and enable compiler warnings
 CFLAGS  = -g -Wall -Werror
 
+LDFLAGS ?= -lpthread -lrt
+
 # Set the target name
 TARGET = aesdsocket
 
@@ -14,7 +16,7 @@ default: $(TARGET)
 all: $(TARGET)
 
 $(TARGET): $(TARGET).o
-	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o -lpthread
+	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o $(LDFLAGS)
 
 $(TARGET).o: $(TARGET).c
 	$(CC) $(CFLAGS) -c $(TARGET).c
