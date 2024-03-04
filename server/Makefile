@@ -1,6 +1,5 @@
 # Compiler settings
-CC = gcc
-CROSS_COMPILE ?=
+CC ?= $(CROSS_COMPILE)gcc
 
 # Add debugging information and enable compiler warnings
 CFLAGS  = -g -Wall -Werror
@@ -15,10 +14,10 @@ default: $(TARGET)
 all: $(TARGET)
 
 $(TARGET): $(TARGET).o
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o -lpthread
+	$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).o -lpthread
 
 $(TARGET).o: $(TARGET).c
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $(TARGET).c
+	$(CC) $(CFLAGS) -c $(TARGET).c
 
 # Remove the aesdsocket application and all .o files
 clean:
