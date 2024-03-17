@@ -37,6 +37,7 @@ int aesd_open(struct inode *inode, struct file *filp)
 int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
+    filp->private_data = NULL;
     return 0;
 }
 
@@ -50,22 +51,21 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     if((filp == NULL) || (buf == NULL))
     {
-        return -EFAULT;
+        return -EINVAL;
     }
     aesd_dev = filp->private_data;
-/*
+
     if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
     {
         PDEBUG("mutex_lock_interruptible failed");
-        kfree(write_buf);
         return -ERESTARTSYS;
     }
-*/
+
     buffer_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&aesd_dev->buffer, *f_pos, &ret_entry_offset);
     if(buffer_entry == NULL)
     {
         PDEBUG("aesd_circular_buffer_find_entry_offset_for_fpos returned nothing");
-        //mutex_unlock(&aesd_dev->aesd_mutex);
+        mutex_unlock(&aesd_dev->aesd_mutex);
         return read_bytes;
     }
 
@@ -81,13 +81,13 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     if (copy_to_user(buf, buffer_entry->buffptr+ret_entry_offset, read_bytes))
     {
         PDEBUG("copy_to_user failed");
-        //mutex_unlock(&aesd_dev->aesd_mutex);
+        mutex_unlock(&aesd_dev->aesd_mutex);
         return -EFAULT;
     }
 
-    *f_pos = *f_pos + read_bytes;
+    *f_pos += read_bytes;
 
-    //mutex_unlock(&aesd_dev->aesd_mutex);
+    mutex_unlock(&aesd_dev->aesd_mutex);
 
     return read_bytes;
 }
@@ -103,7 +103,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     if((filp == NULL) || (buf == NULL))
     {
-        return -EFAULT;
+        return -EINVAL;
     }
 
     write_buf = kmalloc(count, GFP_KERNEL);
@@ -131,19 +131,19 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     aesd_dev = filp->private_data;
-/*
+
     if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
     {
         PDEBUG("mutex_lock_interruptible failed");
         kfree(write_buf);
         return -ERESTARTSYS;
     }
-*/
+
     aesd_dev->buffer_entry.buffptr = krealloc(aesd_dev->buffer_entry.buffptr, aesd_dev->buffer_entry.size + write_bytes, GFP_KERNEL);
     if(aesd_dev->buffer_entry.buffptr == NULL)
     {
         PDEBUG("krealloc failed");
-        //mutex_unlock(&aesd_dev->aesd_mutex);
+        mutex_unlock(&aesd_dev->aesd_mutex);
         kfree(write_buf);
         return -ENOMEM;
     }
@@ -164,10 +164,10 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     // unlock mutex
-//    mutex_unlock(&aesd_dev->aesd_mutex);
+    mutex_unlock(&aesd_dev->aesd_mutex);
     kfree(write_buf);
 
-    return write_bytes;
+    return count;
 }
 
 struct file_operations aesd_fops = {
