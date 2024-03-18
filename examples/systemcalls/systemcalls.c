@@ -1,3 +1,11 @@
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include "systemcalls.h"
 
 /**
@@ -9,13 +17,24 @@
 */
 bool do_system(const char *cmd)
 {
+    int ret = 0;
+    // Setup syslog logging using LOG_USER
+    openlog(NULL, 0, LOG_USER);
+    ret = system(cmd);
+    // Return checks
+    if (ret == -1)
+    {
+        syslog(LOG_ERR, "system() call failed with an error: %s", strerror(errno));
+        return false;
+    }
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    if (WIFSIGNALED (ret) && (WTERMSIG (ret) == SIGINT || WTERMSIG (ret) == SIGQUIT))
+    {
+        syslog(LOG_ERR, "system() call killed by signal: %d", WTERMSIG (ret));
+        return false;
+    }
+
+    closelog();
 
     return true;
 }
@@ -39,7 +58,13 @@ bool do_exec(int count, ...)
     va_list args;
     va_start(args, count);
     char * command[count+1];
+    int status;
+    pid_t pid;
     int i;
+
+    // Setup syslog logging using LOG_USER
+    openlog(NULL, 0, LOG_USER);
+
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
@@ -49,15 +74,39 @@ bool do_exec(int count, ...)
     // and may be removed
     command[count] = command[count];
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    if (command[0][0] != '/')
+    {
+        syslog(LOG_ERR, "The file path is not an absolute one.");
+        return false;
+    }
+
+    pid = fork();
+    if (pid == -1)
+    {
+        syslog(LOG_ERR, "fork() failed with an error: %s", strerror(errno));
+        return false;
+    }
+    else if (pid == 0)
+    {
+        execv(command[0], command);
+        syslog(LOG_ERR, "execv() failed with an error: %s", strerror(errno));
+        return false;
+    }
+
+    if(waitpid(pid, &status, 0) == -1)
+    {
+        syslog(LOG_ERR, "waitpid() failed with an error: %s", strerror(errno));
+        return false;
+    }
+    else if (WIFEXITED(status)) // Check WIFEXITED and WEXITSTATUS macros
+    {
+        if(WEXITSTATUS(status))
+        {
+            return false;
+        }
+    }
+
+    closelog();
 
     va_end(args);
 
@@ -72,9 +121,15 @@ bool do_exec(int count, ...)
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
     va_list args;
+    int status;
+    int pid;
     va_start(args, count);
     char * command[count+1];
     int i;
+
+    // Setup syslog logging using LOG_USER
+    openlog(NULL, 0, LOG_USER);
+
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
@@ -84,14 +139,46 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
+    // The following code is referenced from https://stackoverflow.com/a/13784315/1446624
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0)
+    {
+        syslog(LOG_ERR, "Failed opening output file %s with an error: %s", outputfile, strerror(errno));
+        return false;
+    }
+    switch (pid = fork()) {
+    case -1:
+        syslog(LOG_ERR, "fork() failed with an error: %s", strerror(errno));
+        return false;
+    case 0:
+        if (dup2(fd, 1) < 0)
+        {
+            syslog(LOG_ERR, "dup2() failed with an error: %s", strerror(errno));
+            return false;
+        }
+        close(fd);
+        execv(command[0], command);
+        syslog(LOG_ERR, "execv() failed with an error: %s", strerror(errno));
+        return false;
+    default:
+        close(fd);
+    }
+
+    if(waitpid(pid, &status, 0) == -1)
+    {
+        syslog(LOG_ERR, "waitpid() failed with an error: %s", strerror(errno));
+        return false;
+    }
+    else if (WIFEXITED(status)) // Check WIFEXITED and WEXITSTATUS macros
+    {
+        if(WEXITSTATUS(status))
+        {
+            return false;
+        }
+    }
+
+    closelog();
 
     va_end(args);
 
