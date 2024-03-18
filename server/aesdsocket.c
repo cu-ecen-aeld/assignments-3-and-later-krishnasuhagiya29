@@ -274,44 +274,60 @@ void setup_signal_handlers(void) {
 }
 
 void create_daemon(void) {
-	int pid = fork();
-	if (pid < 0)
-	{
-		perror("Fork Failed\n");
-		exit(-1);
-	}
-	if (pid > 0)
-	{
-		exit(EXIT_SUCCESS);
-	}
+	// PID: Process ID
+	// SID: Session ID
+	pid_t pid, sid;
+	int fd = 0;
 
-	int sid = setsid();
-	if (sid < 0)
-	{
-		perror("setsid failed");
+	fflush(stdout);
+	pid = fork(); // Fork off the parent process
+	if (pid < 0) {
+		syslog(LOG_ERR, "Unable to fork\r\n");
+		return;
 	}
-
-	if (chdir("/") < 0)
-	{
-
-		perror("chdir failed\n");
-		exit(-1);
+	if (pid > 0) {
+		syslog(LOG_ERR, "Exiting\r\n");
+		return;
 	}
 
+	syslog(LOG_INFO, "Child created\r\n");
+
+	// Create a SID for child
+	sid = setsid();
+	if (sid < 0) {
+		syslog(LOG_ERR, "Unable to create a session\r\n");
+		return;
+	}
+	if ((chdir("/")) < 0) {
+		syslog(LOG_ERR, "Unable to change working directory\r\n");
+		return;
+	}
 	close(STDIN_FILENO);
 	close(STDOUT_FILENO);
 	close(STDERR_FILENO);
 
-	int var_daemon = open("/dev/null", O_RDWR);
-	if (var_daemon < 0)
+	fd = open("/dev/null", O_WRONLY);
+	if (fd == -1)
 	{
-		perror("file redirection failed");
-		exit(-1);
+		syslog(LOG_ERR, "open failed with an error: %s\r\n", strerror(errno));
+		close(fd);
 	}
-	dup2(var_daemon, STDIN_FILENO);
-	dup2(var_daemon, STDOUT_FILENO);
-	dup2(var_daemon, STDERR_FILENO);
-	close(var_daemon);
+	if (dup2(fd, STDIN_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDIN_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	if (dup2(fd, STDOUT_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDOUT_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	if (dup2(fd, STDERR_FILENO) == -1)
+	{
+		syslog(LOG_ERR, "dup2 for STDERR_FILENO failed with an error: %s\r\n", strerror(errno));
+		close(fd);
+	}
+	close(fd);
 }
 
 int main(int argc, char *argv[]) {
