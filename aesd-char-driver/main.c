@@ -55,12 +55,14 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     }
     aesd_dev = filp->private_data;
 
+    // Lock mutex before acessing the global data
     if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
     {
         PDEBUG("mutex_lock_interruptible failed");
         return -ERESTARTSYS;
     }
 
+    // Find entry for the position specified
     buffer_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&aesd_dev->buffer, *f_pos, &ret_entry_offset);
     if(buffer_entry == NULL)
     {
@@ -69,6 +71,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return read_bytes;
     }
 
+    // calculate the number of bytes that can be read
     if((buffer_entry->size - ret_entry_offset) > count)
     {
         read_bytes = count;
@@ -78,6 +81,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         read_bytes = buffer_entry->size - ret_entry_offset;
     }
 
+    // copy the read_bytes number of bytes from kernel buffer to user buffer
     if (copy_to_user(buf, buffer_entry->buffptr+ret_entry_offset, read_bytes))
     {
         PDEBUG("copy_to_user failed");
@@ -85,8 +89,10 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return -EFAULT;
     }
 
+    // advance the pointer by the number of bytes read
     *f_pos += read_bytes;
 
+    // unlock mutex once done accessing global data
     mutex_unlock(&aesd_dev->aesd_mutex);
 
     return read_bytes;
@@ -106,6 +112,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -EINVAL;
     }
 
+    // allocate count number of bytes for kernel buffer
     write_buf = kmalloc(count, GFP_KERNEL);
     if(write_buf == NULL)
     {
@@ -113,6 +120,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -ENOMEM;
     }
 
+    // Copy buffer from user space into kernel space
     if (copy_from_user(write_buf, buf, count))
     {
         PDEBUG("copy_from_user failed");
@@ -120,18 +128,22 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -EFAULT;
     }
 
+    // Check for the position of new line character
     last_byte = memchr(write_buf, '\n', count);
     if(last_byte != NULL)
     {
+        // If new line, calculate the number of bytes to write
         write_bytes = (last_byte - write_buf) + 1;
     }
     else
     {
+        // If no new line, write upto the capacity
         write_bytes = count;
     }
 
     aesd_dev = filp->private_data;
 
+    // Lock mutex before acessing the global data
     if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
     {
         PDEBUG("mutex_lock_interruptible failed");
@@ -139,6 +151,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -ERESTARTSYS;
     }
 
+    // Reallocate the memory based on write bytes
     aesd_dev->buffer_entry.buffptr = krealloc(aesd_dev->buffer_entry.buffptr, aesd_dev->buffer_entry.size + write_bytes, GFP_KERNEL);
     if(aesd_dev->buffer_entry.buffptr == NULL)
     {
@@ -148,22 +161,26 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -ENOMEM;
     }
 
+    // Copy the kernel space buffer content to the circular buffer entry
     memcpy((void *)aesd_dev->buffer_entry.buffptr+aesd_dev->buffer_entry.size, write_buf, write_bytes);
     aesd_dev->buffer_entry.size += write_bytes;
 
     if(last_byte)
     {
         const char *ret_ptr = NULL;
-        ret_ptr = aesd_circular_buffer_add_entry(&aesd_dev->buffer, &aesd_dev->buffer_entry);   // check
+        // If new line was detected, write to the circular buffer
+        ret_ptr = aesd_circular_buffer_add_entry(&aesd_dev->buffer, &aesd_dev->buffer_entry);
         if(ret_ptr)
         {
+            // Free the pointer to the oldest data
             kfree(ret_ptr);
         }
+        // Reset the pointer and size for the new request
         aesd_dev->buffer_entry.size = 0;
         aesd_dev->buffer_entry.buffptr = NULL;
     }
 
-    // unlock mutex
+    // unlock mutex once done accessing global data
     mutex_unlock(&aesd_dev->aesd_mutex);
     kfree(write_buf);
 
@@ -227,6 +244,8 @@ void aesd_cleanup_module(void)
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
+
+    // Referenced from aesd-circular-buffer.h
 
     AESD_CIRCULAR_BUFFER_FOREACH(entry,&aesd_device.buffer,index) {
         kfree(entry->buffptr);
