@@ -19,13 +19,19 @@
 #include <pthread.h>
 #include "queue.h"
 
+#define USE_AESD_CHAR_DEVICE 1
+
 #define PORT "9000"  // the port users will be connecting to
 #define DOMAIN	PF_INET
 #define TYPE	SOCK_STREAM
 #define PROTOCOL	0
 #define BACKLOG 10	 // how many pending connections queue will hold
 #define BUF_SIZE	1024
+#if (USE_AESD_CHAR_DEVICE)
+#define FILE_NAME	"/dev/aesdchar"
+#else
 #define FILE_NAME	"/var/tmp/aesdsocketdata"
+#endif
 #define TEN_SECONDS	10
 #define TIMER_ARRAY_SIZE	50
 
@@ -65,7 +71,6 @@ void* thread_func(void* thread_params)
     if(full_buf == NULL)
     {
     	thread_func_args->thread_completed = true;
-        close(file_fd);
     }
 
     // The following logic is updated based on the review comments from assignment 5 and code review in the class
@@ -77,8 +82,7 @@ void* thread_func(void* thread_params)
         {
             syslog(LOG_ERR, "Failed to recieve byte from client with fd:%d Error:%s\n", thread_func_args->client_fd, strerror(errno));
             thread_func_args->thread_completed = true;
-            close(file_fd);
-            exit(EXIT_FAILURE);
+            return NULL;
         }
         else if (recv_bytes > 0)
         {
@@ -88,8 +92,7 @@ void* thread_func(void* thread_params)
 		    {
 		        syslog(LOG_ERR, "Realloc failure");
 		        thread_func_args->thread_completed = true;
-		        close(file_fd);
-		        exit(EXIT_FAILURE);
+		        return NULL;
 		    }
 
 		    full_buf = updated_buf;
@@ -103,27 +106,51 @@ void* thread_func(void* thread_params)
 	    }
     }while(!packet_complete);
 
+#if !(USE_AESD_CHAR_DEVICE)
+    if(pthread_mutex_lock(&mutex) != 0)
+    {
+		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
+    }
+#endif
+
+	file_fd = open(FILE_NAME, O_CREAT | O_WRONLY | O_APPEND);
+	if(file_fd == -1) {
+		syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
+#if !(USE_AESD_CHAR_DEVICE)
+		pthread_mutex_unlock(&mutex);
+#endif
+		return NULL;
+	}
+
+	syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
 	bytes_written = write(file_fd, full_buf, total_recv_bytes);
 	if (bytes_written == -1) {
 		syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
 		close(file_fd);
-		exit(EXIT_FAILURE);
+#if !(USE_AESD_CHAR_DEVICE)
+		pthread_mutex_unlock(&mutex);
+#endif
+		return NULL;
 	}
 	else if (bytes_written != recv_bytes) {
 		// Partial write, errno is not set in this case
 		syslog(LOG_ERR, "File partially written with %d bytes out of %d bytes", bytes_written, recv_bytes);
 		close(file_fd);
-		exit(EXIT_FAILURE);
+#if !(USE_AESD_CHAR_DEVICE)
+		pthread_mutex_unlock(&mutex);
+#endif
+		return NULL;
 	}
 	syslog(LOG_INFO, "Written %d bytes to the file\r\n", recv_bytes);
+	close(file_fd);
+#if !(USE_AESD_CHAR_DEVICE)
     pthread_mutex_unlock(&mutex);
+#endif
 
-	off_t set_offset = lseek(file_fd, 0, SEEK_SET);
-	if (set_offset == -1)
-	{
-		syslog(LOG_ERR, "lseek() failed with an error: %s\r\n", strerror(errno));
-		close(file_fd);
-		exit(EXIT_FAILURE);
+	file_fd = open(FILE_NAME, O_RDONLY);
+	if(file_fd == -1) {
+		syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
+		return NULL;
 	}
 
 	do
@@ -133,7 +160,7 @@ void* thread_func(void* thread_params)
 		{
 			syslog(LOG_ERR, "read() failed with an error: %s\r\n", strerror(errno));
 			close(file_fd);
-			exit(EXIT_FAILURE);
+			return NULL;
 		}
 
 		if (bytes_read > 0)
@@ -149,10 +176,12 @@ void* thread_func(void* thread_params)
 
 	} while(bytes_read > 0);
 
+
     if(full_buf != NULL)
     {
     	free(full_buf);
     }
+    close(file_fd);
 	close(thread_func_args->client_fd);	// parent doesn't need this
 
 	syslog(LOG_INFO, "Closed connection from %s\r\n", thread_func_args->client_ip);
@@ -190,13 +219,19 @@ void alarm_handler(int sig_no) {
 		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
     }
     else {
-
+		file_fd = open(FILE_NAME, O_CREAT | O_WRONLY | O_APPEND);
+		if(file_fd == -1) {
+			syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
+			pthread_mutex_unlock(&mutex);
+			return;
+		}
 		bytes_written = write(file_fd, MY_TIME, strlen(MY_TIME));
 		if (bytes_written == -1) {
 			syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
 			close(file_fd);
 			return;
 		}
+		close(file_fd);
 		if(pthread_mutex_unlock(&mutex) != 0)
 		{
 			syslog(LOG_ERR, "Failed to unlock mutex from %s\r\n", __func__);
@@ -206,18 +241,20 @@ void alarm_handler(int sig_no) {
 }
 
 void setup_signal_handlers(void) {
+#if !(USE_AESD_CHAR_DEVICE)
 	struct itimerval delay;
 	int ret;
+#endif
 	if(signal(SIGINT, signal_handler) == SIG_ERR) {
 		syslog(LOG_ERR, "signal() for SIGINT failed with an error: %s\r\n", strerror(errno));
-		exit(EXIT_FAILURE);
+		return;
 	}
 
 	if(signal(SIGTERM, signal_handler) == SIG_ERR) {
 		syslog(LOG_ERR, "signal() for SIGTERM failed with an error: %s\r\n", strerror(errno));
-		exit(EXIT_FAILURE);
+		return;
 	}
-
+#if !(USE_AESD_CHAR_DEVICE)
 	// Setup interval timer to print the timestamp every 10 seconds
 	delay.it_value.tv_sec = TEN_SECONDS;
 	delay.it_value.tv_usec = 0;
@@ -226,13 +263,14 @@ void setup_signal_handlers(void) {
 	ret = setitimer (ITIMER_REAL, &delay, NULL);
 	if (ret) {
 		syslog(LOG_ERR, "setitimer() failed with an error: %s\r\n", strerror(errno));
-		exit(EXIT_FAILURE);
+		return;
 	}
 
 	if(signal(SIGALRM, alarm_handler) == SIG_ERR) {
 		syslog(LOG_ERR, "signal() for SIGALRM failed with an error: %s\r\n", strerror(errno));
-		exit(EXIT_FAILURE);
+		return;
 	}
+#endif
 }
 
 void create_daemon(void) {
@@ -245,11 +283,11 @@ void create_daemon(void) {
 	pid = fork(); // Fork off the parent process
 	if (pid < 0) {
 		syslog(LOG_ERR, "Unable to fork\r\n");
-		exit(EXIT_FAILURE);
+		return;
 	}
 	if (pid > 0) {
 		syslog(LOG_ERR, "Exiting\r\n");
-		exit(EXIT_SUCCESS);
+		return;
 	}
 
 	syslog(LOG_INFO, "Child created\r\n");
@@ -258,11 +296,11 @@ void create_daemon(void) {
 	sid = setsid();
 	if (sid < 0) {
 		syslog(LOG_ERR, "Unable to create a session\r\n");
-		exit(EXIT_FAILURE);
+		return;
 	}
 	if ((chdir("/")) < 0) {
 		syslog(LOG_ERR, "Unable to change working directory\r\n");
-		exit(EXIT_FAILURE);
+		return;
 	}
 	close(STDIN_FILENO);
 	close(STDOUT_FILENO);
@@ -300,12 +338,14 @@ int main(int argc, char *argv[]) {
 	// Setup syslog logging using LOG_USER
 	openlog(NULL, 0, LOG_USER);
 
+#if !(USE_AESD_CHAR_DEVICE)
     // Initialize mutex
     if (pthread_mutex_init(&mutex, NULL) != 0)
     {
         syslog(LOG_ERR, "getaddrinfo() failed with an error: %s\r\n", strerror(errno));
-        exit(EXIT_FAILURE);
+        return -1;
     }
+#endif
 
 	if ((argc == 2) && strcmp(argv[1], "-d") == 0) {
 		run_as_daemon = true;
@@ -322,13 +362,13 @@ int main(int argc, char *argv[]) {
 	if (err != 0) {
 		syslog(LOG_ERR, "getaddrinfo() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	if(servinfo == NULL)
 	{
 		syslog(LOG_ERR, "servinfo is NULL\r\n");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, PROTOCOL);
@@ -336,7 +376,7 @@ int main(int argc, char *argv[]) {
 	{
 		syslog(LOG_ERR, "socket() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	syslog(LOG_INFO, "Socket created successfully with fd: %d\r\n", sock_fd);
@@ -345,13 +385,13 @@ int main(int argc, char *argv[]) {
 	if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
 		syslog(LOG_ERR, "setsockopt() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(EXIT_FAILURE);
+		return -1;
 	}	
 
 	if (bind(sock_fd, servinfo->ai_addr, sizeof(struct addrinfo)) == -1) {
 		syslog(LOG_ERR, "bind() failed with an error: %s\r\n", strerror(errno));
 		freeaddrinfo(servinfo);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	syslog(LOG_INFO, "Socket bound successfully \r\n");
@@ -371,19 +411,12 @@ int main(int argc, char *argv[]) {
 
 	if (listen(sock_fd, BACKLOG) == -1) {
 		syslog(LOG_ERR, "listen() failed with an error: %s\r\n", strerror(errno));
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	// Initialize the link list
     SLIST_HEAD(slist_head, thread_data_s) head;
     SLIST_INIT(&head);
-
-	file_fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-	if(file_fd == -1) {
-		syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-	syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
 
 	while(!term_sig_received) {  // main accept() loop
 		struct sockaddr_in client_addr;
@@ -402,7 +435,7 @@ int main(int argc, char *argv[]) {
         if (!thread_struct)
         {
             syslog(LOG_ERR, "Failed to allocate memory for thread structure\r\n");
-            exit(EXIT_FAILURE);
+            return -1;
         }
         thread_struct->client_ip = client_ip;
         thread_struct->client_fd = accept_fd;
@@ -412,7 +445,7 @@ int main(int argc, char *argv[]) {
         {
             syslog(LOG_ERR, "Error creating new thread");
             free(thread_struct);
-            exit(EXIT_FAILURE);
+            return -1;
         }
         thread_struct->thread_id = thread;
         SLIST_INSERT_HEAD(&head, thread_struct, entries);
@@ -428,7 +461,7 @@ int main(int argc, char *argv[]) {
 	            if (id != 0)
 	            {
 	                syslog(LOG_ERR, "Failure joining thread");
-	                exit(EXIT_FAILURE);
+	                return -1;
 	            }
 	            SLIST_REMOVE(&head, thread_ptr, thread_data_s, entries);
 	            free(thread_ptr);
@@ -443,12 +476,15 @@ int main(int argc, char *argv[]) {
         SLIST_REMOVE_HEAD(&head, entries);
         free(thread_rm);
     }
-
+#if !(USE_AESD_CHAR_DEVICE)
     pthread_mutex_destroy(&mutex);
+#endif
 	//free(recv_buf);
 	close(accept_fd);
 	close(sock_fd);
+#if !(USE_AESD_CHAR_DEVICE)
 	remove(FILE_NAME);
+#endif
 	closelog();
 	exit(EXIT_SUCCESS);
 
