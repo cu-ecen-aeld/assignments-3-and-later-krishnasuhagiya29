@@ -19,6 +19,7 @@
 #include <linux/fs.h> // file_operations
 #include <linux/slab.h>
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -184,13 +185,61 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     mutex_unlock(&aesd_dev->aesd_mutex);
     kfree(write_buf);
 
+    // advance the pointer by the number of bytes written
+    *f_pos += count;
+
     return count;
+}
+
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
+{
+    struct aesd_dev *aesd_dev = NULL;
+    uint8_t index = 0;
+    struct aesd_buffer_entry *entry;
+    loff_t total_size = 0;
+    loff_t ret = 0;
+
+    if(filp == NULL)
+    {
+        return -EINVAL;
+    }
+
+    aesd_dev = filp->private_data;
+
+    // Lock mutex before acessing the global data
+    if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
+    {
+        PDEBUG("mutex_lock_interruptible failed");
+        return -ERESTARTSYS;
+    }
+
+    // Calculate the total size of all contents of the circular buffer
+    AESD_CIRCULAR_BUFFER_FOREACH(entry,&aesd_dev->buffer,index) {
+        total_size += entry->size;
+    }
+
+    ret = fixed_size_llseek(filp, offset, whence, total_size);
+    if(ret < 0)
+    {
+        ret = -EINVAL;
+    }
+    else
+    {
+        filp->f_pos = ret;
+    }
+
+    // unlock mutex once done accessing global data
+    mutex_unlock(&aesd_dev->aesd_mutex);
+
+    return ret;
 }
 
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
+    .llseek =     aesd_llseek,
     .read =     aesd_read,
     .write =    aesd_write,
+    //.ioctl =    aesd_ioctl,
     .open =     aesd_open,
     .release =  aesd_release,
 };
