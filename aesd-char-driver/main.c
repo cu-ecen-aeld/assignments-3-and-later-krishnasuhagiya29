@@ -234,12 +234,69 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
     return ret;
 }
 
+static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, unsigned int write_cmd_offset)
+{
+    struct aesd_dev *aesd_dev = NULL;
+    size_t start_offset = 0;
+    int i = 0;
+
+    aesd_dev = filp->private_data;
+
+    // Lock mutex before acessing the global data
+    if (mutex_lock_interruptible(&aesd_dev->aesd_mutex))
+    {
+        PDEBUG("mutex_lock_interruptible failed");
+        return -ERESTARTSYS;
+    }
+
+    // Check for valid write_cmd and write_cmd_offset values
+    if((write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) || (write_cmd_offset >= aesd_dev->buffer.entry[write_cmd].size))
+    {
+        // unlock mutex once done accessing global data
+        mutex_unlock(&aesd_dev->aesd_mutex);
+        return -EINVAL;
+    }
+
+    //Calculate the start_offset to write_cmd
+    for (i = 0; i < write_cmd; i++)
+    {
+        start_offset += aesd_dev->buffer.entry[i].size;
+    }
+
+    // unlock mutex once done accessing global data
+    mutex_unlock(&aesd_dev->aesd_mutex);
+
+    filp->f_pos = start_offset + write_cmd_offset;
+
+    return 0;
+}
+
+// https://lwn.net/Articles/119652/
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long ret = 0;
+    struct aesd_seekto seekto;
+    if(filp == NULL)
+    {
+        return -EINVAL;
+    }
+
+    if(copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0) {
+        ret = -EFAULT;
+    }
+    else 
+    {
+        ret = aesd_adjust_file_offset(filp,seekto.write_cmd,seekto.write_cmd_offset);
+    }
+    return ret;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .llseek =     aesd_llseek,
     .read =     aesd_read,
     .write =    aesd_write,
-    //.ioctl =    aesd_ioctl,
+    .unlocked_ioctl =    aesd_ioctl,
     .open =     aesd_open,
     .release =  aesd_release,
 };
