@@ -271,7 +271,7 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
     return 0;
 }
 
-// https://lwn.net/Articles/119652/
+// Reference: https://lwn.net/Articles/119652/
 long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     long ret = 0;

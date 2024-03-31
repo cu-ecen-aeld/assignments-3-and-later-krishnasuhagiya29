@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <pthread.h>
 #include "queue.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #define USE_AESD_CHAR_DEVICE 1
 
@@ -29,6 +30,8 @@
 #define BUF_SIZE	1024
 #if (USE_AESD_CHAR_DEVICE)
 #define FILE_NAME	"/dev/aesdchar"
+const char* ioctl_command = "AESDCHAR_IOCSEEKTO:";
+size_t ioctl_command_len;;
 #else
 #define FILE_NAME	"/var/tmp/aesdsocketdata"
 #endif
@@ -64,6 +67,7 @@ void* thread_func(void* thread_params)
 	int recv_bytes, bytes_written, bytes_sent, bytes_read = 0;
 	int total_recv_bytes = 0;
     struct thread_data_s* thread_func_args = (struct thread_data_s *) thread_params;
+    int is_aesdchar_iocseekto = 0;
 
     int updated_len = BUF_SIZE;
     char *full_buf = (char *)malloc(sizeof(char));
@@ -72,6 +76,8 @@ void* thread_func(void* thread_params)
     {
     	thread_func_args->thread_completed = true;
     }
+
+    ioctl_command_len = strlen(ioctl_command);
 
     // The following logic is updated based on the review comments from assignment 5 and code review in the class
     do
@@ -104,54 +110,82 @@ void* thread_func(void* thread_params)
 	    {
 	        packet_complete = true;
 	    }
+#if (USE_AESD_CHAR_DEVICE)
+	    // Check if the ioctl command is triggered
+	    is_aesdchar_iocseekto = strncmp(full_buf, ioctl_command, ioctl_command_len);		// ioctl_command is AESDCHAR_IOCSEEKTO:
+	    if ((total_recv_bytes >= (ioctl_command_len + 3)) && (is_aesdchar_iocseekto == 0))	// The full expected command is AESDCHAR_IOCSEEKTO:X,Y
+	    {
+			syslog(LOG_INFO, "AESDCHAR_IOCSEEKTO command received");
+			packet_complete = true;
+	    }
+#endif
     }while(!packet_complete);
 
-#if !(USE_AESD_CHAR_DEVICE)
-    if(pthread_mutex_lock(&mutex) != 0)
+    if(is_aesdchar_iocseekto == 0)
     {
-		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
+		// If ioctl command is triggered, setup the parameters for it
+#if (USE_AESD_CHAR_DEVICE)
+		struct aesd_seekto seekto;
+		char *write_cmd = &full_buf[ioctl_command_len];
+		char *write_cmd_offset = &full_buf[ioctl_command_len+2];
+		// Convert X and Y arguments received as strings to integers
+		seekto.write_cmd = (uint32_t) atol(write_cmd);
+		seekto.write_cmd_offset = (uint32_t) atol(write_cmd_offset);
+		syslog(LOG_INFO, "write_cmd: %d, write_cmd_offset: %d", seekto.write_cmd, seekto.write_cmd_offset);
+		file_fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND);
+		ioctl(file_fd, AESDCHAR_IOCSEEKTO, &seekto);
+#endif
     }
-#endif
+    else
+    {
+	#if !(USE_AESD_CHAR_DEVICE)
+	    if(pthread_mutex_lock(&mutex) != 0)
+	    {
+			syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
+	    }
+	#endif
 
-	file_fd = open(FILE_NAME, O_CREAT | O_WRONLY | O_APPEND);
-	if(file_fd == -1) {
-		syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
-#if !(USE_AESD_CHAR_DEVICE)
-		pthread_mutex_unlock(&mutex);
-#endif
-		return NULL;
-	}
+		file_fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND);
+		if(file_fd == -1) {
+			syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
+	#if !(USE_AESD_CHAR_DEVICE)
+			pthread_mutex_unlock(&mutex);
+	#endif
+			return NULL;
+		}
 
-	syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
-	bytes_written = write(file_fd, full_buf, total_recv_bytes);
-	if (bytes_written == -1) {
-		syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
+		syslog(LOG_INFO, "File %s opened for dumping the packet data\r\n", FILE_NAME);
+		bytes_written = write(file_fd, full_buf, total_recv_bytes);
+		if (bytes_written == -1) {
+			syslog(LOG_ERR, "Failed writing to file with an error: %s\r\n", strerror(errno));
+			close(file_fd);
+	#if !(USE_AESD_CHAR_DEVICE)
+			pthread_mutex_unlock(&mutex);
+	#endif
+			return NULL;
+		}
+		else if (bytes_written != recv_bytes) {
+			// Partial write, errno is not set in this case
+			syslog(LOG_ERR, "File partially written with %d bytes out of %d bytes", bytes_written, recv_bytes);
+			close(file_fd);
+	#if !(USE_AESD_CHAR_DEVICE)
+			pthread_mutex_unlock(&mutex);
+	#endif
+			return NULL;
+		}
+		syslog(LOG_INFO, "Written %d bytes to the file\r\n", recv_bytes);
 		close(file_fd);
-#if !(USE_AESD_CHAR_DEVICE)
-		pthread_mutex_unlock(&mutex);
-#endif
-		return NULL;
-	}
-	else if (bytes_written != recv_bytes) {
-		// Partial write, errno is not set in this case
-		syslog(LOG_ERR, "File partially written with %d bytes out of %d bytes", bytes_written, recv_bytes);
-		close(file_fd);
-#if !(USE_AESD_CHAR_DEVICE)
-		pthread_mutex_unlock(&mutex);
-#endif
-		return NULL;
-	}
-	syslog(LOG_INFO, "Written %d bytes to the file\r\n", recv_bytes);
-	close(file_fd);
-#if !(USE_AESD_CHAR_DEVICE)
-    pthread_mutex_unlock(&mutex);
-#endif
-
-	file_fd = open(FILE_NAME, O_RDONLY);
-	if(file_fd == -1) {
-		syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
-		return NULL;
-	}
+	#if !(USE_AESD_CHAR_DEVICE)
+	    pthread_mutex_unlock(&mutex);
+	#endif
+	    // In ioctl case, we already opened a file so won't need to open again
+	    syslog(LOG_INFO, "Opening file again");
+		file_fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND);
+		if(file_fd == -1) {
+			syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
+			return NULL;
+		}
+    }
 
 	do
 	{
@@ -219,7 +253,7 @@ void alarm_handler(int sig_no) {
 		syslog(LOG_ERR, "Failed to lock mutex from %s\r\n", __func__);
     }
     else {
-		file_fd = open(FILE_NAME, O_CREAT | O_WRONLY | O_APPEND);
+		file_fd = open(FILE_NAME, O_CREAT | O_RDWR | O_APPEND);
 		if(file_fd == -1) {
 			syslog(LOG_ERR, "Failed opening file %s with an error: %s", FILE_NAME, strerror(errno));
 			pthread_mutex_unlock(&mutex);
