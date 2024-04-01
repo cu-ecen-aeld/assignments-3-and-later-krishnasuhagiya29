@@ -317,11 +317,11 @@ void create_daemon(void) {
 	pid = fork(); // Fork off the parent process
 	if (pid < 0) {
 		syslog(LOG_ERR, "Unable to fork\r\n");
-		return;
+		exit(-1);
 	}
 	if (pid > 0) {
 		syslog(LOG_ERR, "Exiting\r\n");
-		return;
+		exit(EXIT_SUCCESS);
 	}
 
 	syslog(LOG_INFO, "Child created\r\n");
