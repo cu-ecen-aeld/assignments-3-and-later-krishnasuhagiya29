@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # A script to display the count of occurrences of a specified string and the number of files in which the string is present within a directory.
 # Usage: ./finder.sh <filesdir> <searchstr>
 
